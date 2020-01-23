@@ -108,11 +108,9 @@ function keplerian_to_pqr(c::constellation)
 	# r_pqr: array of r_pqr positions for each satellite
 	# v_pqr: array of velocities for each satellite in pqr
 
-	Θ = (280.4606 + 360.9856473 * t)/180*pi # gives radians
-
 	mu = 3.986E5 #km3/s2
-	R = 6371 #km
-	T = 2*pi*sqrt.((c.alt.+R).^3/mu) # seconds
+	R_E = 6371 #km
+	T = 2*pi*sqrt.((c.alt.+R_E).^3/mu) # seconds
 	n = 2*pi ./T #radians/sec
 
 	r_pqr = fill(fill(0.0,3),c.num_sats)
@@ -120,13 +118,13 @@ function keplerian_to_pqr(c::constellation)
 	for i in 1:c.num_sats
 		plane_ind = Int(ceil(i/c.sats_per_plane))
 		E = true_anomaly_to_ecc_anomaly(c.ν[i],c.ecc[plane_ind])
-		r_pqr[i] = [(c.alt[plane_ind]+R)*(cosd(E)-c.ecc[plane_ind])
-			(c.alt[plane_ind]+R)*sqrt(1-c.ecc[plane_ind]^2)*sind(E)
+		r_pqr[i] = [(c.alt[plane_ind]+R_E)*(cosd(E)-c.ecc[plane_ind])
+			(c.alt[plane_ind]+R_E)*sqrt(1-c.ecc[plane_ind]^2)*sind(E)
 			0]
 	
 		Ė = n[plane_ind]/(1-c.ecc[plane_ind]*cosd(E)) # rad/s
-		v_pqr[i] = [-(c.alt[plane_ind]+R)*Ė*sind(E)
-			(c.alt[plane_ind]+R)*Ė*sqrt(1-c.ecc[plane_ind]^2)*cosd(E)
+		v_pqr[i] = [-(c.alt[plane_ind]+R_E)*Ė*sind(E)
+			(c.alt[plane_ind]+R_E)*Ė*sqrt(1-c.ecc[plane_ind]^2)*cosd(E)
 			0]
 
 	end
@@ -163,19 +161,20 @@ function pqr_to_ijk(c::constellation,r_pqr,v_pqr)
 	return r_ijk,v_ijk
 end
 
-function ijk_to_eci(c::constellation,r_ijk,v_ijk,t)
+function ijk_to_eci(c::constellation,r_ijk,v_ijk,MJD)
 	# this function converts from pqr to ijk coordinates for all satellites
 
 	# INPUTS:
 	# c: the constellation struct
 	# r_ijk: array of the the ijk coordinates (km)
 	# v_ijk: array of the velocities in ijk (km/s)
-	# t: solar days since since Jan 1, 2000, 12 h
+	# t: time in MJD
 
 	# OUTPUTS:
 	# r_eci: array of the eci coordinates (km)
 	# v_eci: array of the eci velocities (km)
 
+	t = MJD - 51544.5
 	conv = R_z(280.4606 + 360.9856473 * t)
 
 	r_eci = fill(fill(0.0,3),c.num_sats)
@@ -190,13 +189,13 @@ function ijk_to_eci(c::constellation,r_ijk,v_ijk,t)
 	return r_eci,v_eci
 end
 
-function keplerian_to_ECI(c::constellation, t)
+function keplerian_to_ECI(c::constellation, MJD)
 	# this function takes a constellation struct and a time and converts it to 
 	# a series of ECI positions and velocities for each satellite
 
 	# INPUTS:
 	# constellation: struct defined earlier
-	# t: solar time in days since January 1, 2000 at 12h
+	# t: time in MJD
 
 	# OUTPUTS:
 	# positions: array of 3x1 arrays that lists the positions of each satellite
@@ -204,61 +203,101 @@ function keplerian_to_ECI(c::constellation, t)
 
 	r_pqr,v_pqr = keplerian_to_pqr(c)
 	r_ijk,v_ijk = pqr_to_ijk(c,r_pqr,v_pqr)
-	r_eci,v_eci = ijk_to_eci(c,r_ijk,v_ijk,t)
+	r_eci,v_eci = ijk_to_eci(c,r_ijk,v_ijk,MJD)
 
 	return r_eci,v_eci
 end
 
-## Now let's generate some dynamics
-
-function OrbitPlotter(x,p,t)
-#this function plots an orbit of a satellite to get the position over a time period
 
 
-r = x[1:3] #km
-v = x[4:6] #km/s
+function get_mag_field(X,t)
 
-#force balance
-#gravity
-#2-body gravity
-f_grav=GM/(norm(r)^2)*-r/(norm(r)) #km/s^2
+	# INPUTS:
+	# X: lists of states
+	# [r_eci/R_E;
+	# v_eci;
+	# ω; r
+	# q;
+	# ρ;
+	# MJD]
+	# U: control over entire trajectory
+	# t: time vector in MJD
 
-# atmospheric drag (assuming that time is invariant)
-# date is new years on 2019
-altitude=norm(r)-R_E #meters
+	# OUTPUTS:
+	# B_ECI: 
 
-#find the latitude and longitude in a geometric frame
-GMST = (280.4606 + 360.9856473*(t/24/60/60 .+ (MJD_0.+t./(24*60*60)) .- 51544.5))./180*pi #calculates Greenwich Mean Standard Time
-ROT = [cos(GMST) sin(GMST) 0;-sin(GMST) cos(GMST) 0; 0 0 1]
-pos_ecef = ROT*r
-lat= pos_ecef[3]/norm(pos_ecef)
-long= atan(pos_ecef[2]/pos_ecef[1])
+	B_ECI = zeros(length(t),3)
 
-# out=SatelliteToolbox.nrlmsise00(DatetoJD(2019, 1, 1, 00, 00, 00), # Julian Day
-    #              altitude,# Altitude [m]
-    #              -lat*pi/180,# Latitude [rad]
-    #              -long*pi/180,# Longitude [rad]
-    #              83.7,# 81 day average F10.7 flux
-    #              102.5,# Daily F10.7 for previous day
-    #              15;# Magnetic index (daily)
-    #              output_si = false# Output in cm^-3 and g/cm^-3
-    # );
-# ω_earth = [0;0;7.2921150E-5] #rad/s
-# v_ecef = v-cross(ω_earth,r)
-# f_drag=.5*out.den_Total*norm(v_ecef)^2*mass/BC*-v_ecef/norm(v_ecef)
+	for i in 1:length(t)
 
-#J2 oblateness term
-J2=0.0010826359;
-#J2=0;
-f_J2=[J2*r[1]/norm(r)^7*(6*r[3]-1.5*(r[1]^2+r[2]^2))
-     J2*r[2]/norm(r)^7*(6*r[3]-1.5*(r[1]^2+r[2]^2))
-     J2*r[3]/norm(r)^7*(3*r[3]-4.5*(r[1]^2+r[2]^2))];
+		r = X[i][1:3]*R_E #km
+		v = X[i][4:6] #km/s
+
+		MJD = X[i][17] - 51544.5
+		t = MJD - 51544.5
+
+		GMST = (280.4606 + 360.9856473*(t))./180*pi #calculates Greenwich Mean Standard Time
+		ROT = [cos(GMST) sin(GMST) 0;-sin(GMST) cos(GMST) 0; 0 0 1]
+		pos_ecef = ROT*r
+		lat= pos_ecef[3]/norm(pos_ecef)
+		long= atan(pos_ecef[2]/pos_ecef[1])
+		NED_to_ENU = [0 1 0;1 0 0;0 0 -1]
+		R_ENU_to_XYZ =
+	            [-sin(long) -sin(lat)*cos(long) cos(lat)*cos(long);
+	            cos(long) -sin(lat)*sin(long) cos(lat)*sin(long);
+	            0 cos(lat) sin(lat)]
+		B_ECI[i,:] = Rz(GMST)'* R_ENU_to_XYZ *NED_to_ENU * collect(igrf12syn(0, 2019, 2,(norm(r)), lat*180/pi, ((long+2π) % 2π)*180/pi)[1:3])*1E-9
+	end
+
+	return B_ECI
+
+end
 
 
-#acceleration
-a=(f_grav+f_J2); #km/s^2
+function simulate_trajectory(x_0,U,t)
+	# this function simulates a satellite trajectory over a given time vector
 
-return [v;a]
+	# INPUTS:
+	# x_0: initial state
+	# [r_eci/R_E;
+	# v_eci;
+	# ω; r
+	# q;
+	# ρ;
+	# MJD]
+	# U: control over entire trajectory
+	# t: time vector in MJD
+
+	# OUTPUTS:
+	# X: state over all time points
+
+	X = fill(fill(0.0,17),length(t))
+
+	X[1] = x_0
+
+	B_ECI_log = fill(fill(0.0,3),length(t))
+
+	for i in 1:length(t)-1
+
+		X[i+1]= rk4(X[i],U[i],dynamics_dot,days_to_sec(t[i+1]-t[i]))
+
+	end
+
+	return X
+
+end
+
+function days_to_sec(days)
+	# simple function that converts between days and seconds
+
+	return days*24*60*60
+
+end
+
+function sec_to_days(seconds)
+	# simple function that converts between seconds and days
+
+	return seconds/60/60/24
 
 end
 
