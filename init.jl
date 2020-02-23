@@ -216,7 +216,7 @@ function traj_cost(X)
 	# OUTPUTS:
 	# T: total cost
 
-	m = num_sats*6
+	m = 3*6
 	N = length(t)
 	T = 0
 	for k = 1:N-1
