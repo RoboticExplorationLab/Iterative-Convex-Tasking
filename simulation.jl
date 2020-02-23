@@ -18,7 +18,7 @@ struct constellation
 	inc::AbstractArray{Float64,1}
 	Ω::AbstractArray{Float64,1}
 	ω::AbstractArray{Float64,1}
-	ν::AbstractArray{Float64,1}
+	M::AbstractArray{Float64,1}
 end
 
 function generate_constellation(num_sats,num_planes,sats_per_plane,alt,ecc,inc,Ω,ω,ν)
@@ -32,7 +32,7 @@ function generate_constellation(num_sats,num_planes,sats_per_plane,alt,ecc,inc,�
 	# inc (inclinations): array of size 1 x num_planes (degrees)
 	# Ω (RAAN): array of size 1 x num_planes (degrees)
 	# ω (arg of periapsis): array of size 1 x num_planes (degrees)
-	# ν (true anomaly): array of size 1 x num_planes (degrees)
+	# M (mean anomaly): array of size 1 x num_planes (degrees)
 	# 
 	# OUTPUTS:
 	# constellation (if possible)
@@ -48,7 +48,7 @@ function generate_constellation(num_sats,num_planes,sats_per_plane,alt,ecc,inc,�
 		print("the size of the ν vector is wrong.\n")
 	end
 	if size_flag
-		return constellation(num_sats,num_planes,sats_per_plane,alt,ecc,inc,Ω,ω,ν)
+		return constellation(num_sats,num_planes,sats_per_plane,alt,ecc,inc,Ω,ω,M)
 	end
 end
 
@@ -63,12 +63,12 @@ function evenly_distribute(num_sats,num_planes,sats_per_plane)
 	# OUTPUS:
 	# ν: array of size 1xnum_sats that has all the true anomalies for the satellites
 
-	ν = zeros(num_sats)
+	M = zeros(num_sats)
 	for i in 1:num_planes
-		ν[(i-1)*sats_per_plane+1:i*sats_per_plane] = collect(0:360/sats_per_plane:360-360/sats_per_plane)
+		M[(i-1)*sats_per_plane+1:i*sats_per_plane] = collect(0:360/sats_per_plane:360-360/sats_per_plane)
 	end
 
-	return ν
+	return M
 end
 
 ## Now list conversions between orbital parameters to ECI for dynamics stuff
@@ -97,6 +97,27 @@ function true_anomaly_to_ecc_anomaly(ν,e)
 	return E
 end
 
+function mean_anomaly_to_ecc_anomaly(M,e)
+	# this function takes in a true anomaly and outputs an eccentric anomaly
+
+	# INPUTS:
+	# M: true anomaly (degrees)
+	# e: eccentricity (unitless)
+
+	# OUTPUTS:
+	# E: eccentric anomaly (degrees)
+
+	# kepler's equation
+	M = M/180*pi
+	E = pi
+	for i in 1:100
+		E = e*sin(E)+M
+	end
+
+	return E*180/pi
+
+end
+
 function keplerian_to_pqr(c::constellation)
 	# this function converts a constellation and a time into a series of r_pqr
 
@@ -109,7 +130,7 @@ function keplerian_to_pqr(c::constellation)
 	# v_pqr: array of velocities for each satellite in pqr
 
 	mu = 3.986E5 #km3/s2
-	R_E = 6371 #km
+	R_E = 6378.137 #km
 	T = 2*pi*sqrt.((c.alt.+R_E).^3/mu) # seconds
 	n = 2*pi ./T #radians/sec
 
@@ -117,9 +138,9 @@ function keplerian_to_pqr(c::constellation)
 	v_pqr = fill(fill(0.0,3),c.num_sats)
 	for i in 1:c.num_sats
 		plane_ind = Int(ceil(i/c.sats_per_plane))
-		E = true_anomaly_to_ecc_anomaly(c.ν[i],c.ecc[plane_ind])
-		r_pqr[i] = [(c.alt[plane_ind]+R_E)*(cosd(E)-c.ecc[plane_ind])
-			(c.alt[plane_ind]+R_E)*sqrt(1-c.ecc[plane_ind]^2)*sind(E)
+		E = mean_anomaly_to_ecc_anomaly(c.M[i],c.ecc[plane_ind])
+		r_pqr[i] = [(c.alt[plane_ind]+R_E)*(cosd(E)-c.ecc[plane_ind]);
+			(c.alt[plane_ind]+R_E)*sqrt(1-c.ecc[plane_ind]^2)*sind(E);
 			0]
 	
 		Ė = n[plane_ind]/(1-c.ecc[plane_ind]*cosd(E)) # rad/s
@@ -132,7 +153,7 @@ function keplerian_to_pqr(c::constellation)
 	return r_pqr,v_pqr
 end
 
-function pqr_to_ijk(c::constellation,r_pqr,v_pqr)
+function pqr_to_eci(c::constellation,r_pqr,v_pqr)
 	# this function converts from pqr to ijk coordinates for all satellites
 
 	# INPUTS:
@@ -141,52 +162,52 @@ function pqr_to_ijk(c::constellation,r_pqr,v_pqr)
 	# v_pqr: array of the velocities in pqr (km/s)
 
 	# OUTPUTS:
-	# r_ijk: array of the ijk coordinates (km)
-	# v_ijk: array of the ijk velocities (km)
+	# r_eci: array of the ijk coordinates (km)
+	# v_eci: array of the ijk velocities (km)
 
-	r_ijk = fill(fill(0.0,3),c.num_sats)
-	v_ijk = fill(fill(0.0,3),c.num_sats)
+	r_eci = fill(fill(0.0,3),c.num_sats)
+	v_eci = fill(fill(0.0,3),c.num_sats)
 
 	conv = []
-	for i in 1:num_planes
+	for i in 1:c.num_planes
 		push!(conv,R_z(-c.Ω[i])*R_x(-c.inc[i])*R_z(-c.ω[i]))
 	end
 
 	for i in 1:c.num_sats
 		plane_ind = Int(ceil(i/c.sats_per_plane))
-		r_ijk[i] = conv[plane_ind]*r_pqr[i]
-		v_ijk[i] = conv[plane_ind]*v_pqr[i]
+		r_eci[i] = conv[plane_ind]*r_pqr[i]
+		v_eci[i] = conv[plane_ind]*v_pqr[i]
 	end
 
-	return r_ijk,v_ijk
+	return r_eci,v_eci
 end
 
-function ijk_to_eci(c::constellation,r_ijk,v_ijk,MJD)
+function eci_to_ecef(c::constellation,r_eci,v_eci,MJD)
 	# this function converts from pqr to ijk coordinates for all satellites
 
 	# INPUTS:
 	# c: the constellation struct
-	# r_ijk: array of the the ijk coordinates (km)
-	# v_ijk: array of the velocities in ijk (km/s)
+	# r_eci: array of the the ijk coordinates (km)
+	# v_eci: array of the velocities in ijk (km/s)
 	# t: time in MJD
 
 	# OUTPUTS:
-	# r_eci: array of the eci coordinates (km)
-	# v_eci: array of the eci velocities (km)
+	# r_ecef: array of the eci coordinates (km)
+	# v_ecef: array of the eci velocities (km)
 
 	t = MJD - 51544.5
 	conv = R_z(280.4606 + 360.9856473 * t)
 
-	r_eci = fill(fill(0.0,3),c.num_sats)
-	v_eci = fill(fill(0.0,3),c.num_sats)
+	r_ecef = fill(fill(0.0,3),c.num_sats)
+	v_ecef = fill(fill(0.0,3),c.num_sats)
 
 	for i in 1:c.num_sats
 		plane_ind = Int(ceil(i/c.sats_per_plane))
-		r_eci[i] = conv*r_ijk[i]
-		v_eci[i] = conv*v_ijk[i]
+		r_ecef[i] = conv*r_eci[i]
+		v_ecef[i] = conv*v_eci[i]
 	end
 
-	return r_eci,v_eci
+	return r_ecef,v_ecef
 end
 
 function keplerian_to_ECI(c::constellation, MJD)
@@ -202,8 +223,7 @@ function keplerian_to_ECI(c::constellation, MJD)
 	# velocities: array of 3x1 arrays that lists the velocities for each satellite
 
 	r_pqr,v_pqr = keplerian_to_pqr(c)
-	r_ijk,v_ijk = pqr_to_ijk(c,r_pqr,v_pqr)
-	r_eci,v_eci = ijk_to_eci(c,r_ijk,v_ijk,MJD)
+	r_eci, v_eci = pqr_to_eci(c,r_pqr,v_pqr)
 
 	return r_eci,v_eci
 end
@@ -233,20 +253,20 @@ function get_mag_field(X,t)
 		r = X[i][1:3]*R_E #km
 		v = X[i][4:6] #km/s
 
-		MJD = X[i][17] - 51544.5
+		MJD = X[i][17]
 		t = MJD - 51544.5
 
 		GMST = (280.4606 + 360.9856473*(t))./180*pi #calculates Greenwich Mean Standard Time
 		ROT = [cos(GMST) sin(GMST) 0;-sin(GMST) cos(GMST) 0; 0 0 1]
 		pos_ecef = ROT*r
 		lat= pos_ecef[3]/norm(pos_ecef)
-		long= atan(pos_ecef[2]/pos_ecef[1])
+		long= atan(pos_ecef[2],pos_ecef[1])
 		NED_to_ENU = [0 1 0;1 0 0;0 0 -1]
 		R_ENU_to_XYZ =
 	            [-sin(long) -sin(lat)*cos(long) cos(lat)*cos(long);
 	            cos(long) -sin(lat)*sin(long) cos(lat)*sin(long);
 	            0 cos(lat) sin(lat)]
-		B_ECI[i,:] = Rz(GMST)'* R_ENU_to_XYZ *NED_to_ENU * collect(igrf12syn(0, 2019, 2,(norm(r)), lat*180/pi, ((long+2π) % 2π)*180/pi)[1:3])*1E-9
+		B_ECI[i,:] = Rz(GMST)'* R_ENU_to_XYZ * NED_to_ENU * igrf12(MJD_to_year(MJD),norm(r)*1E3, lat, long)*1E-9
 	end
 
 	return B_ECI
@@ -279,13 +299,46 @@ function simulate_trajectory(x_0,U,t)
 
 	for i in 1:length(t)-1
 
-		X[i+1]= rk4(X[i],U[i],dynamics_dot,days_to_sec(t[i+1]-t[i]))
-
+		X[i+1] = rk4(X[i],U[i],dynamics_dot,days_to_sec(t[i+1]-t[i]))
+		X[i+1][end] = t[i+1]
 	end
 
 	return X
 
 end
+
+function simulate_trajectory_posvel(x_0,U,t)
+	# this function simulates a satellite trajectory over a given time vector
+
+	# INPUTS:
+	# x_0: initial state
+	# [r_eci/R_E;
+	# v_eci;
+	# ω; r
+	# q;
+	# ρ;
+	# MJD]
+	# U: control over entire trajectory
+	# t: time vector in MJD
+
+	# OUTPUTS:
+	# X: state over all time points
+
+	X = fill(fill(0.0,7),length(t))
+
+	X[1] = x_0
+
+	for i in 1:length(t)-1
+
+		X[i+1] = rk4(X[i],U[i],posvel_dynamics_dot,days_to_sec(t[i+1]-t[i]))
+		X[i+1][end] = t[i+1]
+	end
+
+	return X
+
+end
+
+
 
 function days_to_sec(days)
 	# simple function that converts between days and seconds
