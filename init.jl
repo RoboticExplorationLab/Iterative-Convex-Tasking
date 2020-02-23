@@ -1,9 +1,9 @@
 # This code was generated to test the feasability of using satellite relative ranging
-# measurements for better orbit determination. 
+# measurements for better orbit determination.
 
 # First, we'll establish the parameters of a satellite constellation
 
-# TODO: 
+# TODO:
 # - normalize all state vectors
 # - find better way to transfer global variables
 
@@ -108,7 +108,7 @@ t = MJD:sec_to_days(dt):MJD+sec_to_days(600)
 
 # g_estimate = zeros(num_sats*length(t))
 # for j in 1:length(t)
-# 	g_estimate[3*(j-1)+1:3*(j-1)+3] = 
+# 	g_estimate[3*(j-1)+1:3*(j-1)+3] =
 # 		[rel_range(X_simple[1][j][1:3],X_simple[2][j][1:3],perfect_sensor);
 # 		rel_range(X_simple[2][j][1:3],X_simple[3][j][1:3],perfect_sensor);
 # 		rel_range(X_simple[1][j][1:3],X_simple[3][j][1:3],perfect_sensor)]
@@ -142,7 +142,7 @@ function g(x)
 		rel_range(x[7:9],x[13:15],perfect_sensor);
 		rel_range(x[1:3],x[13:15],perfect_sensor)]
 
-end	
+end
 
 function unpackx(X)
 	# this function just unpacks X into a vector
@@ -189,14 +189,14 @@ X_est-X_correct
 
 Y = fill(fill(0.0,3),length(t))
 for j in 1:length(t)
-	Y[j] = 
+	Y[j] =
 		[rel_range(X_correct[j][1:3],X_correct[j][7:9],perfect_sensor);
 		rel_range(X_correct[j][7:9],X_correct[j][13:15],perfect_sensor);
 		rel_range(X_correct[j][1:3],X_correct[j][13:15],perfect_sensor)]
 end
 
-R = 1E-1*Matrix(I,3,3) # weighting matrices
-Q = 1E-1*Matrix(I,18,18)
+R = 1.0*Matrix(I,3,3) # weighting matrices
+Q = 1.0*Matrix(I,18,18)
 
 function traj_cost(X)
 	# given an input trajectory and a set of measurements
@@ -207,9 +207,9 @@ function traj_cost(X)
 	# GLOBALS:
 	# R: cost of measurement residual
 	# Q: cost of dynamics residual
-	# Y: total vector of measurements 
+	# Y: total vector of measurements
 	# f: dynamics function
-	# g: cost function 
+	# g: cost function
 	# N: number of time steps per input
 	# m: number of states per time step
 
@@ -220,7 +220,7 @@ function traj_cost(X)
 	N = length(t)
 	T = 0
 	for k = 1:N-1
-		T += 1/2*(Y[k]-g(X[m*(k-1)+1:m*k]))'*inv(R)*(Y[k]-g(X[m*(k-1)+1:m*k])) + 
+		T += 1/2*(Y[k]-g(X[m*(k-1)+1:m*k]))'*inv(R)*(Y[k]-g(X[m*(k-1)+1:m*k])) +
 			(X[m*(k)+1:m*(k+1)]-f(X[m*(k-1)+1:m*k]))'*inv(Q)*(X[m*(k)+1:m*(k+1)]-f(X[m*(k-1)+1:m*k]))
 	end
 	T += 1/2*(Y[N]-g(X[m*(N-1)+1:m*N]))'*inv(R)*(Y[N]-g(X[m*(N-1)+1:m*N]))
@@ -234,53 +234,81 @@ end
 
 grad = x -> ForwardDiff.gradient(traj_cost,x)
 jac = x -> ForwardDiff.hessian(traj_cost,x)
-iters = 25
+iters = 3
 err = zeros(iters+1)
 err[1] = traj_cost(unpackx(X_est))
-λ = zeros(iters+1)
-λ[1] = 1E8 # set to 0 for GN
-
+# λ = zeros(iters+1)
+# λ[1] = 1E8 # set to 0 for GN
+#
 # Newton step parameters
-ρ_αu = 1.2
-ρ_αd = 0.5
-ρ_ls = 0.01
-ρ_λd = 0.5
-ρ_λu = 1.0
+# ρ_αu = 1.2
+# ρ_αd = 0.5
+# ρ_ls = 0.01
+# ρ_λd = 0.5
+# ρ_λu = 1.0
+#
+# @time let X_est = X_est
+# 	α = 1
+# 	for i in 1:iters
+# 		λ_temp = λ[i]
+#
+# 		∇f = grad(unpackx(X_est))
+#
+# 		∇f2 = jac(unpackx(X_est))
+#
+# 		δx = -inv(∇f2'*∇f2+λ_temp*Matrix(I,size(∇f2,1),size(∇f2,1)))*∇f2'*∇f
+#
+# 		# line search
+# 		while traj_cost(unpackx(X_est) + α*δx) > traj_cost(unpackx(X_est)) + ρ_ls*∇f'*(α*δx)
+# 			α *= ρ_αd
+#
+# 			#reassign λ and recompute δx
+# 			λ_temp *= ρ_λu
+# 			δx = -inv(∇f2'*∇f2+λ_temp*Matrix(I,size(∇f2,1),size(∇f2,1)))*∇f2'*∇f
+# 		end
+#
+# 		X_est += packx(α*δx,18)
+#
+# 		# reassign step size
+# 		α = min(ρ_αu*α,1)
+#
+# 		# reconfigure λ
+# 		λ[i+1] = λ_temp*ρ_λd
+#
+# 		err[i+1] = traj_cost(unpackx(X_est))
+#
+# 		println("Iteration: ",i)
+# 	end
+# end
 
+#Standard Newton Method
 @time let X_est = X_est
 	α = 1
 	for i in 1:iters
-		λ_temp = λ[i]
+
+		current_cost = traj_cost(unpackx(X_est))
 
 		∇f = grad(unpackx(X_est))
-
 		∇f2 = jac(unpackx(X_est))
 
-		δx = -inv(∇f2'*∇f2+λ_temp*Matrix(I,size(∇f2,1),size(∇f2,1)))*∇f2'*∇f
+		δx = -∇f2\∇f
 
-		# line search
-		while traj_cost(unpackx(X_est) + α*δx) > traj_cost(unpackx(X_est)) + ρ_ls*∇f'*(α*δx)
-			α *= ρ_αd
-
-			#reassign λ and recompute δx
-			λ_temp *= ρ_λu
-			δx = -inv(∇f2'*∇f2+λ_temp*Matrix(I,size(∇f2,1),size(∇f2,1)))*∇f2'*∇f
+		# dumbest possible line search
+		α = 1.0
+		new_X = unpackx(X_est) + α*δx
+		new_cost = traj_cost(new_X)
+		while  new_cost > current_cost
+			α = 0.5*α
+			new_X = unpackx(X_est) + α*δx
+			new_cost = traj_cost(new_X)
 		end
+		println("alpha= ",α)
+		X_est += packx(new_X,18)
 
-		X_est += packx(α*δx,18)
-
-		# reassign step size
-		α = min(ρ_αu*α,1)
-
-		# reconfigure λ
-		λ[i+1] = λ_temp*ρ_λd
-
-		err[i+1] = traj_cost(unpackx(X_est))
+		err[i+1] = new_cost
 
 		println("Iteration: ",i)
 	end
 end
 
 plot([err,λ], layout = 2)
-
-
