@@ -1,8 +1,5 @@
-# This code was generated to test the feasability of using convex optimization 
-# for the tasking of Earth Observation constellations. It uses a combination of
-# ADMM, iLQR, and cost function heuristics. It is meant to be compared to 
-# the current standards in cooperative tasking like MILP (from optimization
-# research), as well as random assignment and genetic algorithms. 
+# This code was generated to test the feasability of using satellite relative ranging
+# measurements for better orbit determination. 
 
 # First, we'll establish the parameters of a satellite constellation
 
@@ -43,8 +40,9 @@ MJD = 7321+51544.5 #days since Jan 1,2000, 12 h converted to MJD
 
 r_eci,v_eci = keplerian_to_ECI(c,MJD)
 
-# estimated constellation
-num_sats = 3
+# This converts desired Keplerian parameters to an initial ECI
+# estimated constellation (just assume one for now)
+num_sats = 1
 num_planes = 1
 sats_per_plane = Int(num_sats/num_planes)
 alt = [810] # km
